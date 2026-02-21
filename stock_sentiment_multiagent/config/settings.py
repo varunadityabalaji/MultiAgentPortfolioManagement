@@ -1,16 +1,28 @@
 """
 config/settings.py
 Central configuration loaded from environment variables / .env file.
-Sentiment-only weights for 4 sources.
+Supports multiple LLM providers: groq, deepseek, gemini.
 """
 from pydantic_settings import BaseSettings
 from pydantic import ConfigDict
+from typing import Optional
 
 
 class Settings(BaseSettings):
     model_config = ConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    gemini_api_key: str
+    # --- LLM provider selection ---
+    # Options: "groq", "deepseek", "gemini"
+    llm_provider: str = "groq"
+
+    # Provider-specific API keys (only the active provider's key is required)
+    groq_api_key: Optional[str] = None
+    deepseek_api_key: Optional[str] = None
+    gemini_api_key: Optional[str] = None
+
+    # Model names per provider (sensible defaults)
+    groq_model: str = "llama-3.3-70b-versatile"
+    deepseek_model: str = "deepseek-chat"
     gemini_model: str = "gemini-2.0-flash"
 
     # Sentiment agent weights (must sum to 1.0)

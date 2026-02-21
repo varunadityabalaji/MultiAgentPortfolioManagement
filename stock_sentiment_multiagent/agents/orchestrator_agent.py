@@ -1,7 +1,6 @@
 """
-agents/orchestrator_agent.py
-Thin wrapper around the LangGraph sentiment pipeline.
-Calls the compiled StateGraph and returns the final JSON report.
+Thin wrapper around the LangGraph pipeline.
+Just kicks off the graph and returns the final report dict.
 """
 import logging
 from agents.sentiment_graph import sentiment_graph
@@ -11,16 +10,15 @@ logger = logging.getLogger(__name__)
 
 class OrchestratorAgent:
     """
-    Invokes the LangGraph sequential sentiment pipeline and returns the report.
-    The graph runs nodes one at a time:
-      news → social → analyst → web → debate → aggregate → summary → report
+    Invokes the compiled LangGraph and collects the final report.
+    The graph handles all the sequencing internally:
+    news -> social -> analyst -> web -> debate -> aggregate -> summary -> report
     """
 
     def run(self, ticker: str) -> dict:
         ticker = ticker.upper().strip()
         logger.info(f"Starting LangGraph sentiment pipeline for {ticker}")
 
-        # Invoke the compiled graph with the initial state
         final_state = sentiment_graph.invoke({"ticker": ticker})
 
         report = final_state.get("report", {})

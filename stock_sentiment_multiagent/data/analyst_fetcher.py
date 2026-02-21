@@ -1,8 +1,8 @@
 """
-data/analyst_fetcher.py
-Fetches analyst recommendations and price targets via yfinance.
-Handles column name variations across yfinance versions.
-Includes retry with delay for rate limiting.
+Pulls analyst recommendations and price targets from yfinance.
+
+Has retry logic because Yahoo Finance rate-limits pretty aggressively
+if you make too many requests in a short time.
 """
 import logging
 import time
@@ -10,7 +10,7 @@ import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
-# yfinance column names vary by version — handle both
+# yfinance changes column names between versions, so we check multiple
 _GRADE_COLS = ["To Grade", "ToGrade", "to_grade"]
 _FROM_COLS  = ["From Grade", "FromGrade", "from_grade"]
 _FIRM_COLS  = ["Firm", "firm"]
@@ -18,7 +18,7 @@ _ACTION_COLS = ["Action", "action"]
 
 
 def _get_col(row, candidates):
-    """Return the first matching column value from a row."""
+    """Try each candidate column name until we find one that exists."""
     for col in candidates:
         if col in row.index and row[col]:
             return str(row[col])
@@ -27,8 +27,8 @@ def _get_col(row, candidates):
 
 def fetch_analyst_data(ticker: str, max_retries: int = 3) -> dict:
     """
-    Returns analyst recommendation counts and recent upgrades/downgrades.
-    Retries with increasing delay on rate limit errors.
+    Get analyst consensus, price targets, and recent upgrade/downgrade actions.
+    Retries with backoff if we hit Yahoo's rate limiter.
     """
     delay = 10  # yfinance needs longer cooldown between retries
 
@@ -49,7 +49,7 @@ def fetch_analyst_data(ticker: str, max_retries: int = 3) -> dict:
             target_low  = info.get("targetLowPrice")
             current_price = info.get("currentPrice") or info.get("regularMarketPrice")
 
-            # Recent upgrades/downgrades
+            # try to grab recent upgrades/downgrades
             recent_actions = []
             try:
                 upgrades_df = stock.upgrades_downgrades

@@ -1,14 +1,14 @@
 """
-models/gemini_client.py
-Multi-provider LLM client — supports Groq, DeepSeek, and Gemini.
+LLM client that works with multiple providers (Groq, DeepSeek, Gemini).
 
-All agents import `from models.gemini_client import gemini_client` and use:
-  - gemini_client.generate(prompt) → str
-  - gemini_client.generate_json(prompt) → dict
+All agents just do `from models.gemini_client import gemini_client` and call
+.generate() or .generate_json() -- they don't need to know which backend
+is actually handling the request. The provider is picked from LLM_PROVIDER
+in the .env file.
 
-The active provider is set via LLM_PROVIDER in .env.
-Client initialization is lazy — it only connects when the first call is made,
-so tests (which mock everything) never need real API keys.
+The client is lazy-initialized meaning it only actually connects to the
+API on the first real call. This is important because tests mock everything
+and we don't want them to fail just because there's no API key set up.
 """
 import json
 import re
@@ -20,15 +20,15 @@ logger = logging.getLogger(__name__)
 
 
 class LLMClient:
-    """Unified LLM client that lazily delegates to the configured provider."""
+    """Handles all LLM interactions. Lazy-init so tests don't need real keys."""
 
     def __init__(self):
         self.provider = settings.llm_provider.lower()
-        self._client = None  # Lazy — initialized on first call
+        self._client = None
         self._model = None
 
     def _ensure_initialized(self):
-        """Initialize the provider client on first actual use."""
+        """Set up the actual API client if we haven't already."""
         if self._client is not None:
             return
 
@@ -44,8 +44,6 @@ class LLMClient:
                 f"Supported: groq, deepseek, gemini"
             )
 
-    # ----- Provider-specific init -----
-
     def _init_gemini(self):
         from google import genai
         if not settings.gemini_api_key:
@@ -54,6 +52,7 @@ class LLMClient:
         self._model = settings.gemini_model
 
     def _init_openai_compatible(self):
+        """Groq and DeepSeek both expose OpenAI-compatible endpoints."""
         from openai import OpenAI
 
         if self.provider == "groq":
@@ -71,10 +70,8 @@ class LLMClient:
 
         self._client = OpenAI(api_key=api_key, base_url=base_url)
 
-    # ----- Public API (same interface for all providers) -----
-
     def generate(self, prompt: str, max_retries: int = 4) -> str:
-        """Send a prompt and return the text response. Retries on rate limits."""
+        """Send a prompt and get text back. Has retry logic for rate limits."""
         self._ensure_initialized()
         if self.provider == "gemini":
             return self._generate_gemini(prompt, max_retries)
@@ -82,17 +79,15 @@ class LLMClient:
             return self._generate_openai(prompt, max_retries)
 
     def generate_json(self, prompt: str, max_retries: int = 4) -> dict:
-        """Send a prompt expecting a JSON response. Returns parsed dict."""
+        """Same as generate() but parses the response as JSON."""
         raw = self.generate(prompt, max_retries=max_retries)
-        # Strip markdown code fences if present
+        # strip markdown fences that LLMs sometimes wrap around JSON
         raw = re.sub(r"```(?:json)?", "", raw).strip().strip("`").strip()
         try:
             return json.loads(raw)
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {raw[:500]}")
             raise ValueError(f"Invalid JSON from {self.provider}: {e}") from e
-
-    # ----- Provider-specific generate implementations -----
 
     def _generate_gemini(self, prompt: str, max_retries: int) -> str:
         delay = 15
@@ -145,5 +140,5 @@ class LLMClient:
                 raise
 
 
-# Singleton — name kept as gemini_client for backward compatibility
+# kept the name "gemini_client" so all the imports in agent files still work
 gemini_client = LLMClient()

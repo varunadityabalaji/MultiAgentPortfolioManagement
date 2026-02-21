@@ -1,6 +1,6 @@
 """
-agents/news_sentiment_agent.py
-Fetches financial news headlines and uses Gemini to score sentiment.
+Scrapes financial news headlines (Finviz + Yahoo) and asks the LLM
+to score the overall sentiment for a given ticker.
 """
 from agents.base_agent import BaseAgent
 from data.news_fetcher import fetch_all_headlines

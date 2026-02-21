@@ -1,6 +1,6 @@
 """
-output/report_generator.py
-Builds the final structured sentiment JSON report for downstream consumption.
+Assembles the final JSON report from all the pieces.
+This is just packaging -- no LLM calls happen here.
 """
 from datetime import datetime, timezone
 from config.settings import settings
@@ -13,10 +13,9 @@ def build_report(
     debate: dict,
     summary: str,
 ) -> dict:
-    """
-    Assembles the final sentiment-only JSON report.
-    """
-    # Build per-source output — include only sentiment-relevant fields
+    """Put together the output dict that gets saved as the JSON report."""
+
+    # build per-source section with scores and any extra fields each agent added
     sources = {}
     for name, result in agent_results.items():
         source_data = {
@@ -24,7 +23,7 @@ def build_report(
             "label": result.get("label", "neutral"),
             "reasoning": result.get("reasoning", ""),
         }
-        # Attach source-specific extra fields (mentions, buy_count, etc.)
+        # include extra fields like mentions, buy_count, etc.
         extra_keys = {
             k: v for k, v in result.items()
             if k not in ("score", "label", "reasoning", "agent", "error")

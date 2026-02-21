@@ -1,6 +1,6 @@
 """
-data/web_fetcher.py
-Fetches web search snippets for a stock ticker using DuckDuckGo (no API key needed).
+Scrapes DuckDuckGo HTML search results for a stock ticker.
+No API key needed -- we just parse the HTML response.
 """
 import logging
 import requests
@@ -19,9 +19,8 @@ HEADERS = {
 
 def fetch_web_snippets(ticker: str, company_name: str = "", max_results: int = 6) -> list[str]:
     """
-    Searches DuckDuckGo for recent news/sentiment about the ticker and
-    returns a list of result snippets (title + description).
-    No API key required.
+    Search DuckDuckGo for recent news/sentiment about a stock and
+    return a list of title + snippet strings from the results page.
     """
     query = f"{ticker} stock sentiment news 2026" if not company_name else f"{company_name} {ticker} stock news 2026"
     url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"

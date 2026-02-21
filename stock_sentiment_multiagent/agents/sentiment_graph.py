@@ -1,12 +1,12 @@
 """
-agents/sentiment_graph.py
-LangGraph StateGraph for sequential sentiment analysis.
+LangGraph-based pipeline for sequential sentiment analysis.
 
-Each node makes exactly ONE Gemini call, then passes state to the next node.
-This ensures we never burst multiple calls simultaneously, maximising free tier usage.
+The key design decision here is to run agents one at a time rather than
+in parallel. This is because the free tier APIs (Groq, Gemini) have
+strict rate limits and bursting multiple requests causes 429 errors.
+Sequential execution is slightly slower but way more reliable.
 
-Graph flow:
-  START → news → social → analyst → web → debate → aggregate → summary → END
+Pipeline: news -> social -> analyst -> web -> debate -> aggregate -> summary -> report
 """
 import logging
 import time
@@ -25,11 +25,9 @@ from output.report_generator import build_report
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Shared state that flows through every node in the graph
-# ---------------------------------------------------------------------------
 
 class SentimentState(TypedDict):
+    """Shared state dict that gets passed between all graph nodes."""
     ticker: str
     news_result: dict
     social_result: dict
@@ -41,10 +39,7 @@ class SentimentState(TypedDict):
     report: dict
 
 
-# ---------------------------------------------------------------------------
-# Instantiate agents once (they are stateless, safe to reuse)
-# ---------------------------------------------------------------------------
-
+# agent instances -- these are stateless so we can reuse them safely
 _news_agent    = NewsSentimentAgent()
 _social_agent  = SocialSentimentAgent()
 _analyst_agent = AnalystBuzzAgent()
@@ -53,12 +48,11 @@ _debate_agent  = DebateAgent()
 _aggregator    = AggregatorAgent()
 
 
-# ---------------------------------------------------------------------------
-# Node functions — each receives the full state, returns a partial update
-# ---------------------------------------------------------------------------
+# ---- graph node functions ----
+# each one takes state, does its thing, returns just the fields it owns
 
 def news_node(state: SentimentState) -> dict:
-    """Node 1: News sentiment (Finviz + Yahoo Finance → Gemini)."""
+    """Fetch headlines from Finviz + Yahoo and score them via LLM."""
     ticker = state["ticker"]
     logger.info(f"[news_node] Fetching news sentiment for {ticker}")
     result = _news_agent._safe_run(ticker)
@@ -67,7 +61,7 @@ def news_node(state: SentimentState) -> dict:
 
 
 def social_node(state: SentimentState) -> dict:
-    """Node 2: Social/Reddit sentiment (ApeWisdom → Gemini)."""
+    """Pull Reddit buzz from ApeWisdom and interpret it."""
     ticker = state["ticker"]
     logger.info(f"[social_node] Fetching social sentiment for {ticker}")
     result = _social_agent._safe_run(ticker)
@@ -76,9 +70,9 @@ def social_node(state: SentimentState) -> dict:
 
 
 def analyst_node(state: SentimentState) -> dict:
-    """Node 3: Analyst buzz (yfinance recommendations → Gemini)."""
+    """Grab analyst recs from yfinance. Waits a bit first since the news
+    node already hit yfinance and we don't want to get rate limited."""
     ticker = state["ticker"]
-    # Throttle: news_node already hit yfinance; give it time to cool down
     logger.info(f"[analyst_node] Waiting 5s for yfinance rate limit cooldown...")
     time.sleep(5)
     logger.info(f"[analyst_node] Fetching analyst data for {ticker}")
@@ -88,7 +82,7 @@ def analyst_node(state: SentimentState) -> dict:
 
 
 def web_node(state: SentimentState) -> dict:
-    """Node 4: Web search sentiment (DuckDuckGo → Gemini)."""
+    """Search DuckDuckGo for recent articles and score the snippets."""
     ticker = state["ticker"]
     logger.info(f"[web_node] Fetching web sentiment for {ticker}")
     result = _web_agent._safe_run(ticker)
@@ -97,7 +91,7 @@ def web_node(state: SentimentState) -> dict:
 
 
 def debate_node(state: SentimentState) -> dict:
-    """Node 5: Bull vs Bear debate (Gemini synthesises all 4 agent results)."""
+    """Have the LLM synthesize a bull vs bear debate from all agent outputs."""
     ticker = state["ticker"]
     agent_results = {
         "news_sentiment":  state.get("news_result", {}),
@@ -112,7 +106,7 @@ def debate_node(state: SentimentState) -> dict:
 
 
 def aggregate_node(state: SentimentState) -> dict:
-    """Node 6: Weighted score fusion (pure math — NO Gemini call)."""
+    """Weighted score fusion. No LLM call, just math."""
     agent_results = {
         "news_sentiment":  state.get("news_result", {}),
         "social_sentiment": state.get("social_result", {}),
@@ -129,7 +123,7 @@ def aggregate_node(state: SentimentState) -> dict:
 
 
 def summary_node(state: SentimentState) -> dict:
-    """Node 7: Generate natural language summary (Gemini)."""
+    """Ask the LLM to write a short natural-language summary."""
     ticker      = state["ticker"]
     aggregation = state.get("aggregation", {})
     debate      = state.get("debate_result", {})
@@ -152,7 +146,7 @@ def summary_node(state: SentimentState) -> dict:
 
 
 def report_node(state: SentimentState) -> dict:
-    """Node 8: Assemble final JSON report (no Gemini call)."""
+    """Package everything into the final JSON report. No LLM call."""
     agent_results = {
         "news_sentiment":  state.get("news_result", {}),
         "social_sentiment": state.get("social_result", {}),
@@ -169,18 +163,10 @@ def report_node(state: SentimentState) -> dict:
     return {"report": report}
 
 
-# ---------------------------------------------------------------------------
-# Build and compile the graph
-# ---------------------------------------------------------------------------
-
 def build_sentiment_graph():
-    """
-    Constructs the LangGraph StateGraph for sequential sentiment analysis.
-    Returns a compiled graph ready to invoke.
-    """
+    """Wire up the LangGraph with sequential edges and return the compiled graph."""
     graph = StateGraph(SentimentState)
 
-    # Register nodes
     graph.add_node("news",      news_node)
     graph.add_node("social",    social_node)
     graph.add_node("analyst",   analyst_node)
@@ -190,7 +176,6 @@ def build_sentiment_graph():
     graph.add_node("summary",   summary_node)
     graph.add_node("report",    report_node)
 
-    # Sequential edges
     graph.add_edge(START,       "news")
     graph.add_edge("news",      "social")
     graph.add_edge("social",    "analyst")
@@ -204,5 +189,5 @@ def build_sentiment_graph():
     return graph.compile()
 
 
-# Compiled graph singleton
+# compiled once at import time
 sentiment_graph = build_sentiment_graph()

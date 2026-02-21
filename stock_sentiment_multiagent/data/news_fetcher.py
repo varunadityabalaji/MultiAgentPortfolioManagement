@@ -1,6 +1,6 @@
 """
-data/news_fetcher.py
-Fetches financial news headlines for a ticker from Finviz and Yahoo Finance.
+Scrapes news headlines from Finviz and Yahoo Finance for a given ticker.
+Results are combined and deduplicated before being passed to the news agent.
 """
 import logging
 import requests
@@ -19,7 +19,7 @@ HEADERS = {
 
 
 def fetch_finviz_headlines(ticker: str, max_headlines: int = 10) -> list[str]:
-    """Scrape latest news headlines from Finviz for a given ticker."""
+    """Scrape the news table on Finviz's quote page."""
     url = f"https://finviz.com/quote.ashx?t={ticker.upper()}"
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10)
@@ -41,7 +41,7 @@ def fetch_finviz_headlines(ticker: str, max_headlines: int = 10) -> list[str]:
 
 
 def fetch_yahoo_headlines(ticker: str, max_headlines: int = 5) -> list[str]:
-    """Fetch recent news titles from Yahoo Finance via yfinance."""
+    """Get recent news from Yahoo Finance through yfinance."""
     try:
         stock = yf.Ticker(ticker)
         news = stock.news or []
@@ -56,9 +56,8 @@ def fetch_yahoo_headlines(ticker: str, max_headlines: int = 5) -> list[str]:
 
 
 def fetch_all_headlines(ticker: str) -> list[str]:
-    """Combine headlines from Finviz and Yahoo Finance."""
+    """Combine both sources and deduplicate."""
     headlines = fetch_finviz_headlines(ticker) + fetch_yahoo_headlines(ticker)
-    # Deduplicate while preserving order
     seen = set()
     unique = []
     for h in headlines:

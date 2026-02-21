@@ -1,8 +1,9 @@
 """
-agents/debate_agent.py
-Implements a "Bull vs Bear" debate round inspired by conversational agent research (2025).
-After all sentiment agents run, this agent uses Gemini to synthesize the bull case,
-bear case, and resolution — improving signal quality before final aggregation.
+Runs a "bull vs bear" debate after all sentiment agents have finished.
+
+The idea here is inspired by multi-agent debate papers (Du et al., 2023) --
+having the LLM synthesize conflicting signals improves the final quality
+compared to just averaging scores blindly.
 """
 import json
 from models.gemini_client import gemini_client
@@ -11,15 +12,12 @@ from config.prompts import DEBATE_PROMPT
 
 class DebateAgent:
     """
-    Takes all agent results and produces a structured debate summary:
-    - bull_case: strongest positive arguments
-    - bear_case: strongest negative arguments
-    - resolution: which side has stronger evidence
-    - key_drivers: top sentiment drivers across all sources
+    Receives all agent results and produces a structured debate:
+    bull_case, bear_case, resolution, and key_drivers.
     """
 
     def run(self, ticker: str, agent_results: dict) -> dict:
-        # Build a concise summary of each agent's finding for the prompt
+        # condense each agent's output into something the LLM can digest
         agent_summary = {}
         for name, result in agent_results.items():
             agent_summary[name] = {
@@ -42,7 +40,7 @@ class DebateAgent:
                 "key_drivers": result.get("key_drivers", []),
             }
         except Exception as e:
-            # Graceful fallback — debate is non-critical
+            # debate is nice-to-have, not critical
             return {
                 "bull_case": "Positive signals from multiple sources.",
                 "bear_case": "Some uncertainty remains.",

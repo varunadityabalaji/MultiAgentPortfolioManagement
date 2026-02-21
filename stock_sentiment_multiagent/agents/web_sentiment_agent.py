@@ -1,6 +1,6 @@
 """
-agents/web_sentiment_agent.py
-Fetches DuckDuckGo web search snippets for a ticker and uses Gemini to score sentiment.
+Searches DuckDuckGo for recent articles about a stock and uses
+the LLM to score the sentiment of the search results.
 """
 from agents.base_agent import BaseAgent
 from data.web_fetcher import fetch_web_snippets
@@ -18,7 +18,7 @@ class WebSentimentAgent(BaseAgent):
         return "web_search"
 
     def run(self, ticker: str) -> dict:
-        # Try to get company name for a better search query
+        # try to grab the company name so the search query is better
         company_name = ""
         try:
             info = yf.Ticker(ticker).info

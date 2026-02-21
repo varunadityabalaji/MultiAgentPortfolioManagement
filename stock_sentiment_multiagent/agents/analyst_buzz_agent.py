@@ -1,6 +1,6 @@
 """
-agents/analyst_buzz_agent.py
-Fetches Wall Street analyst recommendations and uses Gemini to score sentiment.
+Fetches Wall St analyst recommendations from yfinance and has the LLM
+interpret the overall analyst sentiment (upgrades, downgrades, targets).
 """
 import json
 from agents.base_agent import BaseAgent
@@ -17,7 +17,7 @@ class AnalystBuzzAgent(BaseAgent):
     def run(self, ticker: str) -> dict:
         data = fetch_analyst_data(ticker)
 
-        # If no meaningful data, return neutral
+        # nothing useful came back — just return neutral
         if not data["recommendation_key"] or data["recommendation_key"] == "none":
             if not data["recent_actions"]:
                 return {
@@ -29,7 +29,7 @@ class AnalystBuzzAgent(BaseAgent):
                     "sell_count": 0,
                 }
 
-        # Count upgrade/downgrade sentiment from recent actions
+        # tally up the recent upgrade/downgrade actions
         buy_count = sum(
             1 for a in data["recent_actions"]
             if any(w in (a.get("to_grade") or "").lower() for w in ["buy", "outperform", "overweight", "strong buy"])
@@ -43,7 +43,7 @@ class AnalystBuzzAgent(BaseAgent):
             if any(w in (a.get("to_grade") or "").lower() for w in ["sell", "underperform", "underweight"])
         )
 
-        # Build a readable summary for Gemini
+        # package it up so the LLM has something readable
         analyst_summary = {
             "consensus": data["recommendation_key"],
             "analyst_count": data["analyst_count"],

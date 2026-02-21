@@ -1,14 +1,15 @@
 """
-agents/aggregator_agent.py
-Combines sentiment scores from all 4 sentiment agents using configurable weights.
-Sentiment-only: no fundamentals or technical analysis.
+Aggregator that fuses all four sentiment agent scores into one composite.
+
+Uses configurable weights from settings. Purely mathematical — no LLM calls.
 """
 from config.settings import settings
 
 
 class AggregatorAgent:
     """
-    Weighted fusion of sentiment agent scores into a composite sentiment score.
+    Takes the raw outputs from each sentiment agent, applies weighted
+    averaging, and produces a final score + label + confidence.
     """
 
     WEIGHT_MAP = {
@@ -20,8 +21,8 @@ class AggregatorAgent:
 
     def run(self, agent_results: dict) -> dict:
         """
-        agent_results: {agent_name: result_dict}
-        Returns composite sentiment score, label, confidence, and per-source breakdown.
+        agent_results should look like {agent_name: {score, label, ...}}.
+        Returns composite score, label, confidence, and per-source breakdown.
         """
         composite = 0.0
         total_weight = 0.0
@@ -40,17 +41,17 @@ class AggregatorAgent:
                 "reasoning": result.get("reasoning", ""),
             }
 
-        # Normalize in case weights don't sum to exactly 1.0
+        # normalize if weights don't perfectly sum to 1
         if total_weight > 0:
             composite /= total_weight
 
         composite = round(max(-1.0, min(1.0, composite)), 4)
         label = self._score_to_label(composite)
 
-        # Confidence = magnitude of composite score (stronger signal = higher confidence)
+        # confidence is based on how strong the signal is
         confidence = round(min(abs(composite) * 1.5, 1.0), 4)
 
-        # Check for agent disagreement and reduce confidence
+        # if agents disagree, we're less confident in the result
         labels = [r.get("label", "neutral") for r in agent_results.values()]
         if labels.count("positive") > 0 and labels.count("negative") > 0:
             confidence = round(confidence * 0.8, 4)

@@ -1,6 +1,6 @@
 """
-agents/social_sentiment_agent.py
-Uses ApeWisdom Reddit mention data and Gemini to score social sentiment.
+Pulls Reddit mention/upvote data from ApeWisdom and asks the LLM
+to interpret the social buzz as a sentiment signal.
 """
 from agents.base_agent import BaseAgent
 from data.social_fetcher import fetch_apewisdom

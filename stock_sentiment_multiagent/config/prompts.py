@@ -1,6 +1,6 @@
 """
-config/prompts.py
-All Gemini prompt templates used by sentiment agents.
+All the prompt templates used by the sentiment agents.
+Kept in one place so they're easy to tweak without touching agent logic.
 """
 
 NEWS_SENTIMENT_PROMPT = """You are a financial sentiment analyst. Analyze the following news headlines for the stock ticker {ticker}.

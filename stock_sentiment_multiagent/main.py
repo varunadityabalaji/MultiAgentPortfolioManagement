@@ -1,8 +1,7 @@
 """
-main.py
-CLI entry point for the stock sentiment multi-agent framework.
+Entry point for running sentiment analysis from the command line.
 
-Usage:
+Example usage:
     python main.py --ticker AAPL
     python main.py --ticker TSLA --output ./results/
 """
@@ -12,7 +11,7 @@ import logging
 import os
 import sys
 
-# Ensure project root is on path when running from any directory
+# make sure imports work even if you run this from a different folder
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from agents.orchestrator_agent import OrchestratorAgent
@@ -43,10 +42,9 @@ def main():
     print(f"\n🔍 Analyzing sentiment for {ticker}...\n")
     report = orchestrator.run(ticker)
 
-    # Print to console
     print(json.dumps(report, indent=2))
 
-    # Save to file
+    # write report to disk
     os.makedirs(args.output, exist_ok=True)
     timestamp = report["timestamp"].replace(":", "-").replace("+", "_")
     filename = f"{ticker}_{timestamp}.json"

@@ -48,13 +48,23 @@ class AggregatorAgent:
         composite = round(max(-1.0, min(1.0, composite)), 4)
         label = self._score_to_label(composite)
 
-        # confidence is based on how strong the signal is
-        confidence = round(min(abs(composite) * 1.5, 1.0), 4)
+        # confidence based on two factors:
+        # 1) signal strength -- stronger composite = more confident
+        # 2) agent agreement -- if all agents point the same way, confidence goes up;
+        #    if they're all over the place, it goes down
+        scores = [float(r.get("score", 0.0)) for r in agent_results.values() if r]
+        if len(scores) > 1:
+            mean = sum(scores) / len(scores)
+            spread = (sum((s - mean) ** 2 for s in scores) / len(scores)) ** 0.5
+            # spread ranges from 0 (perfect agreement) to ~1 (total disagreement)
+            # agreement factor: 1.0 when spread=0, drops toward 0.3 at spread=1
+            agreement = max(0.3, 1.0 - spread * 0.7)
+        else:
+            agreement = 0.5
 
-        # if agents disagree, we're less confident in the result
-        labels = [r.get("label", "neutral") for r in agent_results.values()]
-        if labels.count("positive") > 0 and labels.count("negative") > 0:
-            confidence = round(confidence * 0.8, 4)
+        # base confidence from signal strength, boosted by agreement
+        signal_strength = min(abs(composite) * 1.2, 1.0)
+        confidence = round(min((0.3 + signal_strength * 0.7) * agreement, 1.0), 4)
 
         return {
             "sentiment_score": composite,

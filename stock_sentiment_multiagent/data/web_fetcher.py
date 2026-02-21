@@ -17,14 +17,9 @@ HEADERS = {
 }
 
 
-def fetch_web_snippets(ticker: str, company_name: str = "", max_results: int = 6) -> list[str]:
-    """
-    Search DuckDuckGo for recent news/sentiment about a stock and
-    return a list of title + snippet strings from the results page.
-    """
-    query = f"{ticker} stock sentiment news 2026" if not company_name else f"{company_name} {ticker} stock news 2026"
+def _search_ddg(query: str, max_results: int = 4) -> list[str]:
+    """Run a single DuckDuckGo HTML search and return title+snippet strings."""
     url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
-
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10)
         resp.raise_for_status()
@@ -39,8 +34,35 @@ def fetch_web_snippets(ticker: str, company_name: str = "", max_results: int = 6
             snippet = snippet_tag.get_text(strip=True) if snippet_tag else ""
             if title or snippet:
                 snippets.append(f"{title}: {snippet}".strip(": "))
-
         return snippets
     except Exception as e:
-        logger.error(f"Web fetch error for {ticker}: {e}")
+        logger.warning(f"DuckDuckGo search failed for query '{query}': {e}")
         return []
+
+
+def fetch_web_snippets(ticker: str, company_name: str = "", max_results: int = 8) -> list[str]:
+    """
+    Run multiple DuckDuckGo searches with different query angles to get a
+    more balanced set of web snippets. Using just one query often skews
+    results if the top results happen to be all bullish or all bearish.
+    """
+    name = company_name or ticker
+
+    # two different search angles to reduce single-query bias
+    queries = [
+        f"{name} {ticker} stock analyst outlook forecast 2026",
+        f"{name} {ticker} stock news sentiment risks 2026",
+    ]
+
+    all_snippets = []
+    seen = set()
+    per_query = max_results // len(queries)
+
+    for query in queries:
+        for snippet in _search_ddg(query, max_results=per_query + 2):
+            # deduplicate across queries
+            if snippet not in seen:
+                seen.add(snippet)
+                all_snippets.append(snippet)
+
+    return all_snippets[:max_results]

@@ -19,16 +19,23 @@ class Settings(BaseSettings):
     deepseek_api_key: Optional[str] = None
     gemini_api_key: Optional[str] = None
 
+    # Finnhub API key for analyst data (free at https://finnhub.io/register)
+    finnhub_api_key: Optional[str] = None
+
     # model names with reasonable defaults
     groq_model: str = "llama-3.3-70b-versatile"
     deepseek_model: str = "deepseek-chat"
     gemini_model: str = "gemini-2.0-flash"
 
     # how much weight each agent gets in the final score (should sum to 1.0)
-    weight_news: float = 0.35
-    weight_social: float = 0.25
-    weight_analyst: float = 0.25
-    weight_web: float = 0.15
+    # analyst data is the most reliable signal (institutional consensus from
+    # dozens of analysts), followed by news headlines. Social and web are
+    # noisier -- social measures volume not sentiment, and web scraping is
+    # inconsistent across runs.
+    weight_news: float = 0.30
+    weight_social: float = 0.15
+    weight_analyst: float = 0.35
+    weight_web: float = 0.20
 
 
 settings = Settings()

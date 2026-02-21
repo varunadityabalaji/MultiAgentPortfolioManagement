@@ -1,93 +1,132 @@
 """
-Pulls analyst recommendations and price targets from yfinance.
+Pulls analyst recommendations from Finnhub.
 
-Has retry logic because Yahoo Finance rate-limits pretty aggressively
-if you make too many requests in a short time.
+Finnhub's free tier gives 60 calls/min which is way more reliable
+than yfinance's unofficial scraping. Requires a FINNHUB_API_KEY
+(get one for free at https://finnhub.io/register).
+
+Free tier only includes recommendation_trends. Price targets and
+upgrade/downgrade data require a paid plan -- we try those but
+gracefully fall back if they return 403.
 """
 import logging
-import time
-import yfinance as yf
+import finnhub
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
-# yfinance changes column names between versions, so we check multiple
-_GRADE_COLS = ["To Grade", "ToGrade", "to_grade"]
-_FROM_COLS  = ["From Grade", "FromGrade", "from_grade"]
-_FIRM_COLS  = ["Firm", "firm"]
-_ACTION_COLS = ["Action", "action"]
+# lazy-init so tests don't blow up without a key
+_client = None
 
 
-def _get_col(row, candidates):
-    """Try each candidate column name until we find one that exists."""
-    for col in candidates:
-        if col in row.index and row[col]:
-            return str(row[col])
-    return ""
+def _get_client():
+    global _client
+    if _client is None:
+        api_key = settings.finnhub_api_key
+        if not api_key:
+            raise ValueError(
+                "FINNHUB_API_KEY is required. "
+                "Get a free key at https://finnhub.io/register"
+            )
+        _client = finnhub.Client(api_key=api_key)
+    return _client
 
 
-def fetch_analyst_data(ticker: str, max_retries: int = 3) -> dict:
+def fetch_analyst_data(ticker: str) -> dict:
     """
-    Get analyst consensus, price targets, and recent upgrade/downgrade actions.
-    Retries with backoff if we hit Yahoo's rate limiter.
+    Get analyst consensus and (optionally) price targets + upgrade/downgrade actions.
+    The recommendation_trends endpoint is free; others may need a paid plan.
     """
-    delay = 10  # yfinance needs longer cooldown between retries
+    ticker = ticker.upper()
 
-    for attempt in range(max_retries):
+    try:
+        client = _get_client()
+
+        # 1) recommendation trends (FREE tier) -- returns monthly snapshots
+        #    each has: buy, hold, sell, strongBuy, strongSell, period
+        recs = client.recommendation_trends(ticker)
+        latest_rec = recs[0] if recs else {}
+
+        strong_buy  = latest_rec.get("strongBuy", 0)
+        buy_count   = latest_rec.get("buy", 0)
+        hold_count  = latest_rec.get("hold", 0)
+        sell_count   = latest_rec.get("sell", 0)
+        strong_sell = latest_rec.get("strongSell", 0)
+        total_buy   = strong_buy + buy_count
+        total_sell  = strong_sell + sell_count
+        analyst_count = total_buy + hold_count + total_sell
+
+        # figure out the consensus from the counts
+        if analyst_count == 0:
+            recommendation_key = "none"
+        elif total_buy > hold_count + total_sell:
+            recommendation_key = "strong_buy" if total_buy > 2 * (hold_count + total_sell) else "buy"
+        elif total_sell > hold_count + total_buy:
+            recommendation_key = "strong_sell" if total_sell > 2 * (hold_count + total_buy) else "sell"
+        else:
+            recommendation_key = "hold"
+
+        # 2) price targets (may need paid plan, gracefully skip if 403)
+        target_mean = None
+        target_high = None
+        target_low  = None
         try:
-            if attempt > 0:
-                wait = delay * attempt
-                logger.info(f"yfinance retry {attempt+1}/{max_retries} for {ticker}, waiting {wait}s...")
-                time.sleep(wait)
+            targets = client.price_target(ticker)
+            target_mean = targets.get("targetMean")
+            target_high = targets.get("targetHigh")
+            target_low  = targets.get("targetLow")
+        except Exception as e:
+            if "403" in str(e):
+                logger.debug(f"Price target endpoint requires paid plan, skipping")
+            else:
+                logger.warning(f"Could not fetch price targets for {ticker}: {e}")
 
-            stock = yf.Ticker(ticker)
-            info = stock.info or {}
-
-            recommendation_key = info.get("recommendationKey", "none") or "none"
-            analyst_count = info.get("numberOfAnalystOpinions", 0) or 0
-            target_mean = info.get("targetMeanPrice")
-            target_high = info.get("targetHighPrice")
-            target_low  = info.get("targetLowPrice")
-            current_price = info.get("currentPrice") or info.get("regularMarketPrice")
-
-            # try to grab recent upgrades/downgrades
-            recent_actions = []
-            try:
-                upgrades_df = stock.upgrades_downgrades
-                if upgrades_df is not None and not upgrades_df.empty:
-                    upgrades_df = upgrades_df.reset_index()
-                    for _, row in upgrades_df.head(10).iterrows():
-                        recent_actions.append({
-                            "firm":       _get_col(row, _FIRM_COLS),
-                            "to_grade":   _get_col(row, _GRADE_COLS),
-                            "from_grade": _get_col(row, _FROM_COLS),
-                            "action":     _get_col(row, _ACTION_COLS),
-                        })
-            except Exception as e:
+        # 3) recent upgrades/downgrades (may need paid plan, gracefully skip if 403)
+        recent_actions = []
+        try:
+            upgrades = client.upgrade_downgrade(symbol=ticker)
+            for item in (upgrades or [])[:10]:
+                recent_actions.append({
+                    "firm":       item.get("company", ""),
+                    "to_grade":   item.get("toGrade", ""),
+                    "from_grade": item.get("fromGrade", ""),
+                    "action":     item.get("action", ""),
+                })
+        except Exception as e:
+            if "403" in str(e):
+                logger.debug(f"Upgrade/downgrade endpoint requires paid plan, skipping")
+            else:
                 logger.warning(f"Could not fetch upgrades/downgrades for {ticker}: {e}")
 
-            return {
-                "ticker": ticker.upper(),
-                "recommendation_key": recommendation_key,
-                "analyst_count": analyst_count,
-                "target_mean_price": target_mean,
-                "target_high_price": target_high,
-                "target_low_price":  target_low,
-                "current_price":     current_price,
-                "recent_actions":    recent_actions,
-            }
-        except Exception as e:
-            err_str = str(e).lower()
-            if ("rate" in err_str or "too many" in err_str or "429" in err_str) and attempt < max_retries - 1:
-                logger.warning(f"yfinance rate limit for {ticker} (attempt {attempt+1}/{max_retries})")
-                continue
-            logger.error(f"Analyst data fetch error for {ticker}: {e}")
-            return {
-                "ticker": ticker.upper(),
-                "recommendation_key": "none",
-                "analyst_count": 0,
-                "target_mean_price": None,
-                "target_high_price": None,
-                "target_low_price":  None,
-                "current_price":     None,
-                "recent_actions":    [],
-            }
+        return {
+            "ticker": ticker,
+            "recommendation_key": recommendation_key,
+            "analyst_count": analyst_count,
+            "strong_buy": strong_buy,
+            "buy": buy_count,
+            "hold": hold_count,
+            "sell": sell_count,
+            "strong_sell": strong_sell,
+            "target_mean_price": target_mean,
+            "target_high_price": target_high,
+            "target_low_price":  target_low,
+            "current_price":     None,
+            "recent_actions":    recent_actions,
+        }
+    except Exception as e:
+        logger.error(f"Finnhub analyst data fetch error for {ticker}: {e}")
+        return {
+            "ticker": ticker,
+            "recommendation_key": "none",
+            "analyst_count": 0,
+            "strong_buy": 0,
+            "buy": 0,
+            "hold": 0,
+            "sell": 0,
+            "strong_sell": 0,
+            "target_mean_price": None,
+            "target_high_price": None,
+            "target_low_price":  None,
+            "current_price":     None,
+            "recent_actions":    [],
+        }

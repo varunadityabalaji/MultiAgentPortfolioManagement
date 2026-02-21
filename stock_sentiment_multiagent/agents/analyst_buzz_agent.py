@@ -1,5 +1,5 @@
 """
-Fetches Wall St analyst recommendations from yfinance and has the LLM
+Fetches Wall St analyst recommendations from Finnhub and has the LLM
 interpret the overall analyst sentiment (upgrades, downgrades, targets).
 """
 import json

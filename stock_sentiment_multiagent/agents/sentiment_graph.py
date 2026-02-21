@@ -9,6 +9,7 @@ Graph flow:
   START → news → social → analyst → web → debate → aggregate → summary → END
 """
 import logging
+import time
 from typing import TypedDict, Optional
 from langgraph.graph import StateGraph, START, END
 
@@ -77,6 +78,9 @@ def social_node(state: SentimentState) -> dict:
 def analyst_node(state: SentimentState) -> dict:
     """Node 3: Analyst buzz (yfinance recommendations → Gemini)."""
     ticker = state["ticker"]
+    # Throttle: news_node already hit yfinance; give it time to cool down
+    logger.info(f"[analyst_node] Waiting 5s for yfinance rate limit cooldown...")
+    time.sleep(5)
     logger.info(f"[analyst_node] Fetching analyst data for {ticker}")
     result = _analyst_agent._safe_run(ticker)
     logger.info(f"[analyst_node] score={result.get('score', 0):.3f} label={result.get('label')}")
